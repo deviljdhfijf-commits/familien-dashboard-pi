@@ -1,6 +1,6 @@
 <script lang="ts">
   import {
-    CalendarClock, Check, CircleAlert, ListChecks, Pencil, Plus, Trash2,
+    CalendarClock, Check, CircleAlert, Eraser, ListChecks, Pencil, Plus, Trash2,
   } from 'lucide-svelte';
   import { format, parseISO } from 'date-fns';
   import { de } from 'date-fns/locale';
@@ -31,7 +31,14 @@
 
   function emptyDraft() {
     // 'rotate' | 'everyone' | 'nobody' | die ID einer Person als Text
-    return { title: '', description: '', interval_days: 7, points: 10, zustaendig: 'rotate' };
+    return {
+      title: '',
+      description: '',
+      interval_days: 7,
+      points: 10,
+      zustaendig: 'rotate',
+      einmalig: false,
+    };
   }
 
   let draft = $state(emptyDraft());
@@ -41,7 +48,11 @@
   const overdue = $derived(chores.filter((c) => c.is_overdue));
   const dueToday = $derived(chores.filter((c) => c.is_due && !c.is_overdue));
   // Alles, was gerade nicht ansteht — meist frisch erledigt.
-  const later = $derived(chores.filter((c) => !c.is_due));
+  const later = $derived(chores.filter((c) => !c.is_due && !c.done));
+  // Einmalige Aufgaben, die durch sind. Sie stehen ganz unten und bleiben
+  // sichtbar, bis jemand aufräumt: Am Monatsende will man sehen, was
+  // tatsächlich geschafft wurde.
+  const abgehakt = $derived(chores.filter((c) => c.done));
   const mine = $derived(chores.filter((c) => c.assignee_id === $session.user?.id));
 
   async function complete(chore: Chore) {
@@ -96,6 +107,7 @@
         chore.assignment === 'person' && chore.assignee_id
           ? String(chore.assignee_id)
           : chore.assignment || 'rotate',
+      einmalig: chore.one_off,
     };
     error = '';
     showForm = true;
@@ -115,6 +127,7 @@
       points: draft.points,
       assignment: Number.isFinite(person) && person > 0 ? 'person' : draft.zustaendig,
       assignee_id: Number.isFinite(person) && person > 0 ? person : 0,
+      one_off: draft.einmalig,
     };
     try {
       if (editingId !== null) await choresApi.update(editingId, payload);
@@ -142,14 +155,39 @@
     }
   }
 
+  // Erledigte einmalige Aufgaben wegräumen — alle auf einmal. Einzeln
+  // wären es am Monatsende zwanzig Klicks.
+  async function aufraeumen() {
+    const ok = await confirmAction({
+      title: `${abgehakt.length} erledigte Aufgaben löschen?`,
+      message:
+        'Nur einmalige Aufgaben, die abgehakt sind. Die vergebenen Punkte und die ' +
+        'Monatsranglisten bleiben davon unberührt.',
+    });
+    if (!ok) return;
+    try {
+      await choresApi.clearDone();
+      await onRefresh();
+    } catch (e) {
+      error = e instanceof ApiError ? e.message : 'Konnte nicht aufräumen';
+    }
+  }
+
   // "Nicht fällig" hat zwei ganz verschiedene Gründe: erledigt, oder schlicht
   // noch nicht an der Reihe. Eine nie erledigte Aufgabe als "erledigt" zu
   // zeigen wäre schlicht falsch.
   function isDone(chore: Chore): boolean {
-    return !chore.is_due && !!chore.last_done_at;
+    return chore.done || (!chore.is_due && !!chore.last_done_at);
   }
 
   function dueLabel(chore: Chore): string {
+    // Eine erledigte einmalige Aufgabe kommt nicht wieder. „Wieder am
+    // Donnerstag" wäre hier schlicht gelogen.
+    if (chore.done) {
+      return chore.last_done_at
+        ? `Am ${format(parseISO(chore.last_done_at), 'd. MMM', { locale: de })}`
+        : 'Erledigt';
+    }
     if (!chore.next_due_at) return 'Kein Termin';
     if (chore.is_overdue) {
       const days = Math.abs(chore.days_until_due);
@@ -191,11 +229,22 @@
       Alles im Plan
     {/if}
     {#if mine.length > 0}· {mine.length} für dich{/if}
+    {#if abgehakt.length > 0}· {abgehakt.length} erledigt{/if}
   {/if}
 {/snippet}
 
 {#snippet aktionen()}
   {#if isAdmin}
+    {#if abgehakt.length > 0}
+      <button
+        class="btn-outline px-3"
+        onclick={aufraeumen}
+        aria-label="Erledigte einmalige Aufgaben löschen"
+        title="{abgehakt.length} erledigte einmalige Aufgaben löschen"
+      >
+        <Eraser class="h-5 w-5" />
+      </button>
+    {/if}
     <button class="btn-primary px-3" onclick={startNew} aria-label="Aufgabe hinzufügen">
       <Plus class="h-5 w-5" />
     </button>
@@ -213,15 +262,33 @@
     <form class="space-y-2" onsubmit={save}>
       <input class="input" placeholder="Was ist zu tun?" bind:value={draft.title} maxlength="80" />
       <input class="input" placeholder="Beschreibung (optional)" bind:value={draft.description} />
+      <!--
+        Einmalig oder wiederkehrend. Ein Intervall für „Keller aufräumen"
+        wäre eine Erfindung: Die Aufgabe kommt nicht in sieben Tagen wieder,
+        sie ist dann fertig. Also verschwindet das Feld, statt daneben zu
+        stehen und nichts zu bedeuten.
+      -->
+      <label class="flex items-start gap-2 rounded-lg border border-border p-2.5 text-sm">
+        <input type="checkbox" class="mt-0.5 h-4 w-4 rounded" bind:checked={draft.einmalig} />
+        <span>
+          Nur einmal
+          <span class="block text-xs text-muted-foreground">
+            Steht ab sofort an und ist nach dem Abhaken erledigt — zum Beispiel
+            ein Zahnarzttermin oder der Keller.
+          </span>
+        </span>
+      </label>
       <!-- Zwei Zahlen nebeneinander, die Zuständigkeit auf voller Breite:
            in drei Spalten war das Auswahlfeld so schmal, dass "Reihum"
            abgeschnitten wurde. -->
       <div class="grid grid-cols-2 gap-2">
-        <label class="text-xs text-muted-foreground">
-          Alle X Tage
-          <input class="input mt-1" type="number" min="1" max="365" bind:value={draft.interval_days} />
-        </label>
-        <label class="text-xs text-muted-foreground">
+        {#if !draft.einmalig}
+          <label class="text-xs text-muted-foreground">
+            Alle X Tage
+            <input class="input mt-1" type="number" min="1" max="365" bind:value={draft.interval_days} />
+          </label>
+        {/if}
+        <label class="text-xs text-muted-foreground {draft.einmalig ? 'col-span-2' : ''}">
           Punkte
           <input class="input mt-1" type="number" min="1" max="500" bind:value={draft.points} />
         </label>
@@ -258,7 +325,7 @@
     />
   {:else}
     <ul class="scrollbar-thin max-h-[320px] overflow-y-auto pr-1">
-      {#each [...overdue, ...dueToday, ...later] as chore (chore.id)}
+      {#each [...overdue, ...dueToday, ...later, ...abgehakt] as chore (chore.id)}
         <li
           class="group flex items-center gap-3 rounded-lg px-1 py-2.5 transition-colors
                  [&+li]:border-t [&+li]:border-[color:var(--haarlinie)] hover:bg-muted/25"
@@ -297,14 +364,25 @@
           {/if}
 
           <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-medium {chore.is_due ? '' : 'text-muted-foreground'}">
+            <!-- Durchgestrichen nur, was endgültig durch ist. Eine
+                 wiederkehrende Aufgabe ist nach dem Abhaken nicht erledigt,
+                 sondern nur heute nicht mehr dran. -->
+            <p
+              class="truncate text-sm font-medium {chore.is_due
+                ? ''
+                : 'text-muted-foreground'} {chore.done ? 'line-through' : ''}"
+            >
               {chore.title}
             </p>
             <p class="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
               {#if chore.is_overdue}<CircleAlert class="h-3 w-3 shrink-0 text-destructive" />{/if}
-              {#if chore.is_due}
+              {#if chore.done}
+                <span class="text-primary">{doneLabel(chore)}</span>
+                <span>· {dueLabel(chore)}</span>
+              {:else if chore.is_due}
                 <span class={chore.is_overdue ? 'text-destructive' : ''}>{dueLabel(chore)}</span>
                 <span>· {whoLabel(chore)}</span>
+                {#if chore.one_off}<span>· einmalig</span>{/if}
               {:else if isDone(chore)}
                 <span class="text-primary">{doneLabel(chore)}</span>
                 <span>· {dueLabel(chore)}</span>

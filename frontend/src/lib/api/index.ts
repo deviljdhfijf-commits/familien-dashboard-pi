@@ -3,7 +3,7 @@ import { goto } from '$app/navigation';
 import type {
   Activity, BackupFile, CalendarEvent, Chore, DashboardLayout, DeviceStatus,
   DeviceTarget, EventDraft, FileListing, FileUploadResult, Link, LinkDraft,
-  DayTime, MusicBrowse, MusicDirListing, MusicStatus, Note, Photo,
+  DayTime, MonthBoard, MusicBrowse, MusicDirListing, MusicStatus, Note, Photo,
   PhotoUploadResult, Score, ShoppingEvent, ShoppingItem, TimeOverview, Track,
   User, WeatherData, WeatherLocation, WeeklyTime,
 } from '$lib/types';
@@ -229,12 +229,18 @@ export const choresApi = {
   list: () => request<Chore[]>('/chores'),
   create: (data: {
     title: string; description?: string; interval_days?: number; points?: number; assignee_id?: number;
+    assignment?: string; one_off?: boolean;
   }) => request<Chore>('/chores', { method: 'POST', ...json(data) }),
   update: (
     id: number,
-    data: Partial<{ title: string; description: string; interval_days: number; points: number; assignee_id: number }>,
+    data: Partial<{
+      title: string; description: string; interval_days: number; points: number;
+      assignee_id: number; assignment: string; one_off: boolean;
+    }>,
   ) => request<Chore>(`/chores/${id}`, { method: 'PUT', ...json(data) }),
   remove: (id: number) => request<void>(`/chores/${id}`, { method: 'DELETE' }),
+  /** Räumt die erledigten einmaligen Aufgaben weg — alle auf einmal. */
+  clearDone: () => request<{ deleted: number }>('/chores/done', { method: 'DELETE' }),
   /** userId nur im Familien-Modus nötig — sonst zählt die eigene Anmeldung. */
   complete: (id: number, userId?: number) =>
     request<{ completed_at: string; next_due_at: string; points_awarded: number; title: string }>(
@@ -246,6 +252,8 @@ export const choresApi = {
 export const scoreApi = {
   board: () => request<Score[]>('/scoreboard'),
   history: () => request<Activity[]>('/scoreboard/history'),
+  /** Die Monatsranglisten, laufender Monat zuerst. */
+  months: () => request<MonthBoard[]>('/scoreboard/months'),
 };
 
 export const devicesApi = {

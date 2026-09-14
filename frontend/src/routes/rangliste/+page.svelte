@@ -2,12 +2,39 @@
   import { onMount } from 'svelte';
   import { formatDistanceToNow, parseISO } from 'date-fns';
   import { de } from 'date-fns/locale';
-  import { Flame, ShoppingCart, Sparkles, Star, Trophy } from 'lucide-svelte';
+  import { CalendarRange, Flame, ShoppingCart, Sparkles, Star, Trophy } from 'lucide-svelte';
   import { board, sourceLabels } from '$lib/stores/scores.svelte';
+  import { scoreApi } from '$lib/api';
   import { session } from '$lib/stores';
   import LevelBar from '$lib/components/LevelBar.svelte';
+  import type { MonthBoard } from '$lib/types';
 
   let loading = $state(!board.loaded);
+
+  /**
+   * Die Monatsranglisten. Die Gesamtwertung oben wächst immer weiter — wer
+   * im März angefangen hat, holt den Vorsprung nie mehr auf. Ein Monat
+   * dagegen fängt für alle bei null an, und sein Ergebnis bleibt stehen,
+   * auch wenn die einmaligen Aufgaben von damals gelöscht wurden.
+   */
+  let monate = $state<MonthBoard[]>([]);
+  /** Welcher Monat aufgeklappt ist. Der erste ist es von Anfang an. */
+  let offen = $state<string | null>(null);
+
+  const medaille = (platz: number) => (platz <= 3 ? ['🥇', '🥈', '🥉'][platz - 1] : '');
+
+  /**
+   * Die Zeile unter dem Monatsnamen. Bei Gleichstand stehen beide da —
+   * einen von zweien zum Sieger zu erklären wäre der sicherste Weg zu
+   * Streit am Frühstückstisch.
+   */
+  function siegerzeile(monat: MonthBoard): string {
+    const vorn = monat.ranks.filter((r) => r.rank === 1 && r.points > 0);
+    if (vorn.length === 0) return 'Noch keine Punkte';
+    const namen = vorn.map((r) => `${r.avatar_emoji} ${r.name}`).join(' und ');
+    const wort = monat.running ? 'Vorn' : vorn.length > 1 ? 'Geteilt gewonnen' : 'Gewonnen';
+    return `${wort}: ${namen} · ${vorn[0].points} Punkte`;
+  }
 
   const podium = $derived(board.podium);
   const scoring = $derived(podium.filter((s) => s.total_points > 0));
@@ -29,6 +56,12 @@
       await board.refresh();
     } finally {
       loading = false;
+    }
+    try {
+      monate = await scoreApi.months();
+      offen = monate[0]?.month ?? null;
+    } catch {
+      // Ohne Monatsranglisten bleibt der Rest der Seite brauchbar.
     }
   });
 </script>
@@ -172,6 +205,74 @@
                   {badge.emoji}
                 </span>
               {/each}
+            </div>
+          {/each}
+        </div>
+      </section>
+    {/if}
+
+    <!--
+      Die Monate. Der laufende steht oben und ist als Zwischenstand
+      gekennzeichnet; darunter die abgeschlossenen, die sich nicht mehr
+      ändern. Aufgeklappt ist immer nur einer — sonst wird die Seite auf dem
+      Handy eine Tapete.
+    -->
+    {#if monate.length > 0}
+      <section class="card mb-4">
+        <div class="p-5 pb-3">
+          <h2 class="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            <CalendarRange class="h-4 w-4" /> Monatswertung
+          </h2>
+          <p class="mt-1 text-xs text-muted-foreground">
+            Jeder Monat fängt bei null an. Abgeschlossene Monate bleiben stehen.
+          </p>
+        </div>
+
+        <div class="divide-y divide-border border-t border-border">
+          {#each monate as monat (monat.month)}
+            {@const auf = offen === monat.month}
+
+            <div>
+              <button
+                class="flex w-full items-center gap-3 p-4 text-left transition-colors hover:bg-muted/25"
+                onclick={() => (offen = auf ? null : monat.month)}
+                aria-expanded={auf}
+              >
+                <span class="min-w-0 flex-1">
+                  <span class="block text-sm font-medium">
+                    {monat.label}
+                    {#if monat.running}
+                      <span class="ml-1 text-xs font-normal text-muted-foreground">läuft noch</span>
+                    {/if}
+                  </span>
+                  <span class="mt-0.5 block truncate text-xs text-muted-foreground">
+                    {siegerzeile(monat)}
+                  </span>
+                </span>
+                <span class="shrink-0 text-xs text-muted-foreground">
+                  {auf ? 'Zuklappen' : 'Ansehen'}
+                </span>
+              </button>
+
+              {#if auf}
+                <ul class="space-y-1 px-4 pb-4">
+                  {#each monat.ranks as rang (rang.user_id)}
+                    <li class="flex items-center gap-3 rounded-lg bg-muted/30 px-3 py-2">
+                      <span class="w-7 shrink-0 text-center text-sm tabular-nums">
+                        {medaille(rang.rank) || rang.rank + '.'}
+                      </span>
+                      <span class="text-lg">{rang.avatar_emoji}</span>
+                      <span class="min-w-0 flex-1 truncate text-sm">{rang.name}</span>
+                      <span class="shrink-0 text-[11px] text-muted-foreground">
+                        {rang.activities}×
+                      </span>
+                      <span class="shrink-0 text-sm font-semibold tabular-nums text-primary">
+                        {rang.points}
+                      </span>
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
             </div>
           {/each}
         </div>

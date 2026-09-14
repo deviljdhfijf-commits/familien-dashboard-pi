@@ -261,7 +261,10 @@
           {:else if widget.id === 'shopping'}
             <ShoppingWidget bind:items={shopping} />
           {:else if widget.id === 'calendar'}
-            <CalendarWidget {events} onRefresh={reloadCalendar} />
+            <!-- Die Namensliste kommt aus der Rangliste: Sie steht jedem
+                 offen, die Benutzerverwaltung nur Administratoren — und
+                 eintragen darf hier jeder. -->
+            <CalendarWidget {events} users={board.scores} onRefresh={reloadCalendar} />
           {:else if widget.id === 'links'}
             <LinksWidget />
           {:else if widget.id === 'countdown'}
