@@ -47,9 +47,10 @@ func (l Location) label() string {
 
 const forecastDays = 5
 
-// So viele Stunden zeigt die Kurve auf der Übersicht: gut ein halber Tag,
-// genug für "reicht es noch für eine Runde vor dem Regen?".
-const hourlyHours = 14
+// So viele Stunden gehen an die Oberfläche. Die Kurve auf der Übersicht
+// zeigt davon die ersten zwölf; die Wetterseite nimmt alle und kommt damit
+// über den Rest des Tages und die Nacht hinaus.
+const hourlyHours = 36
 
 type apiResponse struct {
 	Current struct {
@@ -73,9 +74,12 @@ type apiResponse struct {
 	Hourly struct {
 		Time        []string  `json:"time"`
 		Temperature []float64 `json:"temperature_2m"`
+		Apparent    []float64 `json:"apparent_temperature"`
 		PrecipProb  []int     `json:"precipitation_probability"`
 		Precip      []float64 `json:"precipitation"`
 		WeatherCode []int     `json:"weather_code"`
+		CloudCover  []int     `json:"cloud_cover"`
+		WindSpeed   []float64 `json:"wind_speed_10m"`
 	} `json:"hourly"`
 	Minutely15 struct {
 		Time   []string  `json:"time"`
@@ -124,10 +128,16 @@ type Rain struct {
 type Hourly struct {
 	Time              string  `json:"time"`
 	Temperature       float64 `json:"temperature"`
+	FeelsLike         float64 `json:"feels_like"`
 	PrecipProbability int     `json:"precip_probability"`
 	Precipitation     float64 `json:"precipitation"`
 	WeatherCode       int     `json:"weather_code"`
+	CloudCover        int     `json:"cloud_cover"`
+	WindSpeed         float64 `json:"wind_speed"`
 	Icon              string  `json:"icon"`
+	// Nass fasst zusammen, was die Fensterrechnung entscheidet — damit die
+	// Oberfläche dieselbe Schwelle benutzt und nicht ihre eigene erfindet.
+	Nass bool `json:"wet"`
 }
 
 type Daily struct {
@@ -140,6 +150,33 @@ type Daily struct {
 	Sunset            string  `json:"sunset"`
 	Icon              string  `json:"icon"`
 	Description       string  `json:"description"`
+	// Fenster sind die Zeiträume dieses Tages, in denen es draussen geht.
+	// Leer heisst: an diesem Tag ist keiner dabei.
+	Fenster []Fenster `json:"windows"`
+}
+
+// Fenster ist ein Zeitraum am Tag, in dem kein Regen zu erwarten ist.
+//
+// Das ist die Zahl, nach der eine Familie ihren Nachmittag plant — nicht
+// „82 % Regenwahrscheinlichkeit". Ein Prozentwert für einen ganzen Tag sagt
+// nicht, ob der Spaziergang um drei noch geht.
+//
+// Gerechnet wird nur zwischen Sonnenauf- und -untergang: Ein trockenes
+// Fenster um drei Uhr nachts hilft beim Planen niemandem.
+type Fenster struct {
+	Von string `json:"from"`
+	Bis string `json:"to"`
+	// Stunden ist die Länge, auf eine halbe Stunde gerundet.
+	Stunden float64 `json:"hours"`
+	// Was einen dort erwartet. Bewölkung in Prozent, Temperatur gefühlt.
+	Bewoelkung  int     `json:"cloud_cover"`
+	GefuehltAb  float64 `json:"feels_like_min"`
+	GefuehltBis float64 `json:"feels_like_max"`
+	// Sonnig ist wahr, wenn die Bewölkung im Mittel unter 40 % bleibt. Das
+	// entscheidet nicht über das Fenster, es beschreibt es nur.
+	Sonnig bool `json:"sunny"`
+	// Jetzt ist wahr, wenn dieses Fenster gerade läuft.
+	Jetzt bool `json:"now"`
 }
 
 type Service struct {
@@ -233,7 +270,11 @@ func (s *Service) endpoint(loc Location) string {
 	// Stundenwerte für die nächsten Stunden: entscheidend, wenn jemand
 	// gleich aufs Rad steigen will. Der Tageswert "98 % Regen" sagt nicht,
 	// ob es um 15 oder um 21 Uhr losgeht.
-	q.Set("hourly", "temperature_2m,precipitation_probability,precipitation,weather_code")
+	// cloud_cover und der gefühlte Wert kommen dazu: Ein Trockenfenster sagt
+	// nur die halbe Wahrheit, wenn dabei nicht steht, ob die Sonne scheint
+	// und wie kalt es sich anfühlt.
+	q.Set("hourly",
+		"temperature_2m,apparent_temperature,precipitation_probability,precipitation,weather_code,cloud_cover,wind_speed_10m")
 	// Viertelstundenwerte: für Mitteleuropa rechnet Open-Meteo mit dem
 	// DWD-Modell und kann sagen, ob es um 17:15 oder erst um 18:00 losgeht.
 	// Das ist der Unterschied zwischen "Runde geht noch" und "besser nicht".
@@ -275,6 +316,10 @@ func (s *Service) fetch(ctx context.Context) {
 		return
 	}
 
+	// Einmal aus den parallelen Listen Stundenwerte machen. Danach arbeiten
+	// sowohl die Kurve als auch die Fensterrechnung damit.
+	stunden := stundenLesen(&api, loc.Timezone)
+
 	data := Data{
 		Current: Current{
 			Temperature: api.Current.Temperature,
@@ -286,7 +331,7 @@ func (s *Service) fetch(ctx context.Context) {
 			Icon:        CodeToIcon(api.Current.WeatherCode),
 			Description: CodeToDescription(api.Current.WeatherCode),
 		},
-		Hourly:   hourlyFromNow(api.Hourly.Time, api.Hourly.Temperature, api.Hourly.PrecipProb, api.Hourly.Precip, api.Hourly.WeatherCode, loc.Timezone),
+		Hourly:   hourlyFromNow(stunden, loc.Timezone),
 		Rain:     rainWindow(api.Minutely15.Time, api.Minutely15.Precip, api.Hourly.Time, api.Hourly.Precip, loc.Timezone),
 		Forecast: make([]Daily, 0, len(api.Daily.Time)),
 		Location: loc,
@@ -308,6 +353,11 @@ func (s *Service) fetch(ctx context.Context) {
 			Sunrise:           atStr(api.Daily.Sunrise, i),
 			Sunset:            atStr(api.Daily.Sunset, i),
 		}
+		d.Fenster = fensterFuerTag(
+			tagesZeit(d.Sunrise, loc.Timezone),
+			tagesZeit(d.Sunset, loc.Timezone),
+			stunden, time.Now(),
+		)
 		data.Forecast = append(data.Forecast, d)
 	}
 
@@ -569,9 +619,14 @@ func CodeToDescription(code int) string {
 	return "Unbekannt"
 }
 
-// hourlyFromNow schneidet aus den Tageswerten die kommenden Stunden heraus.
-// Open-Meteo liefert ab Mitternacht; interessant ist nur, was noch bevorsteht.
-func hourlyFromNow(times []string, temps []float64, prob []int, precip []float64, codes []int, tz string) []Hourly {
+// hourlyFromNow schneidet aus den Stundenwerten heraus, was noch kommt.
+// Open-Meteo liefert ab Mitternacht; interessant ist nur, was bevorsteht.
+//
+// Die Länge ist absichtlich grosszügiger als die Kurve auf der Übersicht
+// braucht: Die Wetterseite zeigt damit den ganzen Tagesverlauf, und beide
+// nehmen dieselben Zahlen — sonst widersprechen sich zwei Ansichten
+// derselben Sache.
+func hourlyFromNow(stunden []stunde, tz string) []Hourly {
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
 		loc = time.Local
@@ -579,24 +634,22 @@ func hourlyFromNow(times []string, temps []float64, prob []int, precip []float64
 	jetzt := time.Now().In(loc)
 
 	out := make([]Hourly, 0, hourlyHours)
-	for i, t := range times {
-		// Open-Meteo gibt lokale Zeit ohne Zeitzonenangabe zurück.
-		stunde, err := time.ParseInLocation("2006-01-02T15:04", t, loc)
-		if err != nil {
-			continue
-		}
+	for _, st := range stunden {
 		// Die angebrochene Stunde gehört noch dazu.
-		if stunde.Before(jetzt.Truncate(time.Hour)) {
+		if st.Zeit.Before(jetzt.Truncate(time.Hour)) {
 			continue
 		}
-		code := at(codes, i)
 		out = append(out, Hourly{
-			Time:              stunde.Format(time.RFC3339),
-			Temperature:       at(temps, i),
-			PrecipProbability: at(prob, i),
-			Precipitation:     at(precip, i),
-			WeatherCode:       code,
-			Icon:              CodeToIcon(code),
+			Time:              st.Zeit.Format(time.RFC3339),
+			Temperature:       st.Temp,
+			FeelsLike:         st.Gefuehlt,
+			PrecipProbability: st.Prob,
+			Precipitation:     st.Precip,
+			WeatherCode:       st.Code,
+			CloudCover:        st.Cloud,
+			WindSpeed:         st.Wind,
+			Icon:              CodeToIcon(st.Code),
+			Nass:              st.nass(),
 		})
 		if len(out) >= hourlyHours {
 			break

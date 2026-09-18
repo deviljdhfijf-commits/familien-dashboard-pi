@@ -129,6 +129,30 @@ func (s *Store) Migrate() error {
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		)`,
+		// Der Monatsabschluss. Die laufende Rangliste rechnet aus
+		// point_events — und die verschiebt sich, sobald eine einmalige
+		// Aufgabe gelöscht wird. Wer im September gewonnen hat, soll aber im
+		// Dezember noch dastehen. Also wird das Ergebnis zum Monatswechsel
+		// einmal festgeschrieben und danach nicht mehr angefasst.
+		//
+		// Name, Farbe und Emoji stehen mit drin: Sie gehören zur Platzierung
+		// von damals und dürfen sich nicht mehr ändern, wenn jemand später
+		// sein Profil umbenennt oder die Familie verlässt.
+		`CREATE TABLE IF NOT EXISTS month_scores (
+			-- JJJJ-MM des abgeschlossenen Monats.
+			month TEXT NOT NULL,
+			-- Bewusst ohne Fremdschlüssel: Wer die Familie verlässt, soll
+			-- aus der Rangliste vom März nicht verschwinden.
+			user_id INTEGER NOT NULL,
+			name TEXT NOT NULL,
+			color TEXT NOT NULL DEFAULT '',
+			avatar_emoji TEXT NOT NULL DEFAULT '',
+			points INTEGER NOT NULL DEFAULT 0,
+			activities INTEGER NOT NULL DEFAULT 0,
+			rank INTEGER NOT NULL DEFAULT 0,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (month, user_id)
+		)`,
 		`CREATE TABLE IF NOT EXISTS device_status (
 			name TEXT PRIMARY KEY,
 			type TEXT NOT NULL,
@@ -293,6 +317,7 @@ func (s *Store) Migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_music_folder ON music_tracks(folder, filename)`,
 		`CREATE INDEX IF NOT EXISTS idx_weekly_times_user ON weekly_times(user_id, weekday)`,
 		`CREATE INDEX IF NOT EXISTS idx_day_times_day ON day_times(day, user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_month_scores ON month_scores(month, rank)`,
 	}
 
 	for _, m := range migrations {
@@ -313,6 +338,20 @@ func (s *Store) Migrate() error {
 	if err := s.addColumn("users", "in_rotation", "BOOLEAN NOT NULL DEFAULT 1"); err != nil {
 		return err
 	}
+	// Einmalige Aufgaben: der Zahnarzttermin unter den Hausarbeiten. Sie
+	// kommen nicht wieder, wenn sie erledigt sind — ein Intervall wäre für
+	// sie eine Lüge. Voreinstellung 0, damit alles Bestehende bleibt, wie es
+	// ist.
+	if err := s.addColumn("chores", "one_off", "BOOLEAN NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	// Termine für eine einzelne Person. Ohne die Spalte gehört jeder Termin
+	// der ganzen Familie — und „Mama: Zahnarzt 14 Uhr" liess sich gar nicht
+	// eintragen.
+	if err := s.addColumn("calendar_events", "user_id", "INTEGER"); err != nil {
+		return err
+	}
+
 	// Bestehende Aufgaben in die neue Schreibweise überführen. Läuft genau
 	// einmal, weil danach kein leerer Wert mehr übrig ist.
 	if _, err := s.db.Exec(`

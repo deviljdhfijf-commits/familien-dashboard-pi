@@ -2,25 +2,64 @@
   import {
     CalendarDays, FileText, Lock, Pencil, Plus, Repeat, Trash2, X,
   } from 'lucide-svelte';
-  import { differenceInCalendarDays, format, isToday, isTomorrow, parseISO } from 'date-fns';
+  import { addDays, differenceInCalendarDays, format, isToday, isTomorrow, parseISO } from 'date-fns';
   import { de } from 'date-fns/locale';
   import { ApiError, calendarApi } from '$lib/api';
   import Kachel from './Kachel.svelte';
   import KachelLeer from './KachelLeer.svelte';
   import type { CalendarEvent, EventDraft, EventRepeat } from '$lib/types';
+
+  /**
+   * Für die Auswahl „für wen" reichen Name und Emoji. Absichtlich nicht der
+   * ganze Benutzer: Die vollständige Liste bekommt nur ein Administrator,
+   * eintragen darf aber jeder — und dann stünde hier ein leeres Feld.
+   */
+  type Familienmitglied = { id: number; name: string; avatar_emoji: string };
   import { confirmAction } from '$lib/stores/confirm.svelte';
 
   let {
     events = [],
+    users = [],
     onRefresh,
-  }: { events?: CalendarEvent[]; onRefresh: () => Promise<void> } = $props();
+  }: {
+    events?: CalendarEvent[];
+    users?: Familienmitglied[];
+    onRefresh: () => Promise<void>;
+  } = $props();
 
   const repeats: { value: EventRepeat; label: string }[] = [
     { value: 'none', label: 'Einmalig' },
+    { value: 'daily', label: 'Jeden Tag' },
     { value: 'weekly', label: 'Jede Woche' },
     { value: 'monthly', label: 'Jeden Monat' },
     { value: 'yearly', label: 'Jedes Jahr' },
   ];
+
+  // 0 = Montag, so wie ein Kalender gelesen wird — nicht wie JavaScript zählt.
+  const wochentage = [
+    'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag',
+  ];
+
+  /** Der Wochentag eines Datums in derselben Zählung. */
+  function wochentagVon(datum: string): number {
+    const d = parseISO(datum);
+    return Number.isNaN(d.getTime()) ? 0 : (d.getDay() + 6) % 7;
+  }
+
+  /**
+   * „Immer donnerstags" ist das, was man sagen will. Die Auswahl schiebt
+   * deshalb das Datum auf den nächsten Donnerstag vor — sichtbar, damit
+   * niemand raten muss, wann der Termin zum ersten Mal ansteht. Der Server
+   * rechnet dasselbe noch einmal nach; gespeichert wird am Ende nur das
+   * Datum, und das trägt den Wochentag.
+   */
+  function waehleWochentag(gewuenscht: number) {
+    draft.weekday = gewuenscht;
+    const d = parseISO(draft.date);
+    if (Number.isNaN(d.getTime())) return;
+    const abstand = (gewuenscht - ((d.getDay() + 6) % 7) + 7) % 7;
+    draft.date = format(addDays(d, abstand), 'yyyy-MM-dd');
+  }
 
   const colors = ['#0d9488', '#3b82f6', '#ec4899', '#f59e0b', '#8b5cf6', '#ef4444'];
 
@@ -35,6 +74,8 @@
       all_day: false,
       repeat: 'none',
       color: colors[0],
+      user_id: 0,
+      weekday: (new Date().getDay() + 6) % 7,
     };
   }
 
@@ -108,6 +149,10 @@
       all_day: event.all_day,
       repeat: (event.repeat as EventRepeat) ?? 'none',
       color: event.color,
+      user_id: event.user_id ?? 0,
+      // Bei einem wöchentlichen Termin steckt der Wochentag im Datum. Zwei
+      // Stellen für dieselbe Aussage wären eine zu viel.
+      weekday: (start.getDay() + 6) % 7,
     };
     error = '';
     showForm = true;
@@ -178,7 +223,12 @@
       <div class="grid grid-cols-2 gap-2">
         <label class="text-xs text-muted-foreground">
           Datum
-          <input class="input mt-1" type="date" bind:value={draft.date} />
+          <input
+            class="input mt-1"
+            type="date"
+            bind:value={draft.date}
+            onchange={() => (draft.weekday = wochentagVon(draft.date))}
+          />
         </label>
         <label class="text-xs text-muted-foreground">
           Wiederholung
@@ -187,6 +237,34 @@
           </select>
         </label>
       </div>
+
+      {#if draft.repeat === 'weekly'}
+        <label class="block text-xs text-muted-foreground">
+          Jede Woche am
+          <select
+            class="input mt-1"
+            value={String(draft.weekday)}
+            onchange={(e) => waehleWochentag(Number(e.currentTarget.value))}
+          >
+            {#each wochentage as tag, i}<option value={String(i)}>{tag}</option>{/each}
+          </select>
+        </label>
+      {/if}
+
+      <!--
+        Für wen der Termin gilt — nicht, wer ihn eingetragen hat. „Mama:
+        Zahnarzt 14 Uhr" ist ein anderer Eintrag als ein Familienausflug, und
+        beide gehören in denselben Kalender.
+      -->
+      <label class="block text-xs text-muted-foreground">
+        Für wen
+        <select class="input mt-1" value={String(draft.user_id)} onchange={(e) => (draft.user_id = Number(e.currentTarget.value))}>
+          <option value="0">👪 Die ganze Familie</option>
+          {#each users as u (u.id)}
+            <option value={String(u.id)}>{u.avatar_emoji} {u.name}</option>
+          {/each}
+        </select>
+      </label>
 
       <label class="flex items-center gap-2 text-sm">
         <input type="checkbox" class="h-4 w-4 rounded" bind:checked={draft.all_day} />
@@ -270,6 +348,15 @@
 
                   <span class="min-w-0 flex-1">
                     <span class="flex items-center gap-1.5 truncate text-sm font-medium">
+                      {#if event.user_emoji}
+                        <span
+                          class="shrink-0"
+                          title="Termin von {event.user_name}"
+                          aria-label="Termin von {event.user_name}"
+                        >
+                          {event.user_emoji}
+                        </span>
+                      {/if}
                       {event.title}
                       {#if event.recurring}
                         <Repeat class="h-3 w-3 shrink-0 text-muted-foreground" />

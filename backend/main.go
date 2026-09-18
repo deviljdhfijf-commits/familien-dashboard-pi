@@ -87,6 +87,7 @@ func main() {
 	go shoppingSvc.Start(ctx)
 	go notesSvc.Start(ctx)
 	go choresSvc.Start(ctx)
+	go pointsSvc.Start(ctx)
 	go devicesSvc.Start(ctx)
 	go backupSvc.Start(ctx)
 	go musicSvc.Start(ctx)
@@ -186,6 +187,8 @@ func main() {
 			r.Get("/chores", choresSvc.List)
 			r.Post("/chores", choresSvc.Create)
 			r.Put("/chores/{id}", choresSvc.Update)
+			// Steht vor /chores/{id}, damit „done" nicht als ID gelesen wird.
+			r.Delete("/chores/done", choresSvc.DeleteDone)
 			r.Delete("/chores/{id}", choresSvc.Delete)
 			r.Post("/chores/{id}/complete", choresSvc.Complete)
 
@@ -193,6 +196,9 @@ func main() {
 			// either one. /chores/stats stays as the historical path.
 			r.Get("/scoreboard", pointsSvc.Scoreboard)
 			r.Get("/scoreboard/history", pointsSvc.History)
+			// Die Monatsranglisten. Sie bleiben stehen, wenn die einmaligen
+			// Aufgaben des Monats längst gelöscht sind.
+			r.Get("/scoreboard/months", pointsSvc.Months)
 			r.Get("/chores/stats", pointsSvc.Scoreboard)
 
 			r.Get("/devices", devicesSvc.GetStatus)

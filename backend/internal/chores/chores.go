@@ -46,6 +46,15 @@ type Chore struct {
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
 
+	// OneOff: eine Aufgabe, die genau einmal ansteht — Keller aufräumen,
+	// Fahrrad zur Werkstatt. Sie kommt nach dem Abhaken nicht wieder.
+	OneOff bool `json:"one_off"`
+	// Erledigt ist nur für einmalige Aufgaben interessant: Sie bleiben in
+	// der Liste stehen, durchgestrichen, bis jemand aufräumt. Wer sie sofort
+	// verschwinden liesse, könnte am Monatsende nicht mehr nachsehen, was
+	// eigentlich alles geschafft wurde.
+	Erledigt bool `json:"done"`
+
 	AssigneeName  string `json:"assignee_name"`
 	AssigneeColor string `json:"assignee_color"`
 	AssigneeEmoji string `json:"assignee_emoji"`
@@ -66,6 +75,7 @@ type CreateRequest struct {
 	Rotate       *bool  `json:"rotate"`
 	Assignment   string `json:"assignment"`
 	AssigneeID   *int   `json:"assignee_id"`
+	OneOff       bool   `json:"one_off"`
 }
 
 type UpdateRequest struct {
@@ -76,6 +86,7 @@ type UpdateRequest struct {
 	Rotate       *bool   `json:"rotate"`
 	Assignment   *string `json:"assignment"`
 	AssigneeID   *int    `json:"assignee_id"`
+	OneOff       *bool   `json:"one_off"`
 }
 
 type Service struct {
@@ -113,8 +124,13 @@ func (s *Service) rotateDue() {
 	// Datenbank stehen Zeitstempel historisch in zwei Textformaten — einmal
 	// von Go geschrieben, einmal von SQLite selbst. Ein Vergleich mit
 	// datetime('now') stellt die beiden Formate gegenüber und liefert Unsinn.
+	//
+	// Erledigte einmalige Aufgaben bleiben aussen vor. Sie haben keinen
+	// Stichtag mehr, und „kein Stichtag" gilt hier sonst als fällig — die
+	// Aufgabe würde bis in alle Ewigkeit weitergereicht.
 	rows, err := s.db.Query(`
-		SELECT id, assignee_id, next_due_at FROM chores WHERE assignment = 'rotate'`)
+		SELECT id, assignee_id, next_due_at FROM chores
+		WHERE assignment = 'rotate' AND NOT (one_off = 1 AND last_done_at IS NOT NULL)`)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to load chores for rotation")
 		return
@@ -220,7 +236,7 @@ func (s *Service) userIDs(query string) ([]int, error) {
 
 const choreColumns = `c.id, c.title, c.description, c.interval_days, c.points, c.rotate,
 	c.assignment, c.assignee_id, c.last_done_at, c.next_due_at, c.created_at, c.updated_at,
-	u.name, u.color, u.avatar_emoji,
+	c.one_off, u.name, u.color, u.avatar_emoji,
 	(SELECT du.name FROM chore_completions cc JOIN users du ON du.id = cc.user_id
 	  WHERE cc.chore_id = c.id ORDER BY cc.id DESC LIMIT 1)`
 
@@ -295,9 +311,10 @@ func (s *Service) Create(w http.ResponseWriter, r *http.Request) {
 	// warten dürfen, bis man sie abhaken kann.
 	nextDue := startOfDay(time.Now())
 	res, err := s.db.Exec(
-		`INSERT INTO chores (title, description, interval_days, points, rotate, assignment, assignee_id, next_due_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		req.Title, req.Description, req.IntervalDays, req.Points, rotate, zuweisung, assignee, nextDue)
+		`INSERT INTO chores (title, description, interval_days, points, rotate, assignment, assignee_id, next_due_at, one_off)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		req.Title, req.Description, req.IntervalDays, req.Points, rotate, zuweisung, assignee, nextDue,
+		req.OneOff)
 	if err != nil {
 		log.Error().Err(err).Msg("DB error creating chore")
 		auth.HTTPError(w, http.StatusInternalServerError, "Server-Fehler")
@@ -362,6 +379,16 @@ func (s *Service) Update(w http.ResponseWriter, r *http.Request) {
 			sets = append(sets, "assignee_id = NULL")
 		}
 	}
+	if req.OneOff != nil {
+		sets = append(sets, "one_off = ?")
+		args = append(args, *req.OneOff)
+		// Aus einmalig wird wiederkehrend: Die Aufgabe braucht wieder einen
+		// Stichtag, sonst stünde sie ohne einen da und gälte als nie erledigt.
+		if !*req.OneOff {
+			sets = append(sets, "next_due_at = COALESCE(next_due_at, ?)")
+			args = append(args, startOfDay(time.Now()))
+		}
+	}
 	// assignee_id = 0 explicitly clears the assignment.
 	if req.AssigneeID != nil {
 		if *req.AssigneeID > 0 {
@@ -398,6 +425,27 @@ func (s *Service) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// DeleteDone räumt die erledigten einmaligen Aufgaben weg.
+//
+// Sie bleiben bewusst durchgestrichen stehen, bis jemand aufräumt: Am
+// Monatsende will man sehen, was tatsächlich geschafft wurde. Ist der Monat
+// abgeschlossen und die Rangliste festgeschrieben, kann die Liste wieder
+// leer werden — ohne dass jemand zwanzig Häkchen einzeln löschen muss.
+//
+// Wiederkehrende Aufgaben sind nie betroffen. „Erledigt" heisst bei ihnen
+// nur „heute schon gemacht".
+func (s *Service) DeleteDone(w http.ResponseWriter, r *http.Request) {
+	res, err := s.db.Exec(
+		"DELETE FROM chores WHERE one_off = 1 AND last_done_at IS NOT NULL")
+	if err != nil {
+		log.Error().Err(err).Msg("DB error clearing finished one-off chores")
+		auth.HTTPError(w, http.StatusInternalServerError, "Server-Fehler")
+		return
+	}
+	entfernt, _ := res.RowsAffected()
+	auth.WriteJSON(w, map[string]any{"deleted": entfernt})
 }
 
 // completeRequest trägt am Wandgerät die Person, die gerade abgehakt hat.
@@ -440,16 +488,27 @@ func (s *Service) Complete(w http.ResponseWriter, r *http.Request) {
 	var intervalDays, reward int
 	var title string
 	var assignee sql.NullInt64
-	var due sql.NullTime
+	var due, lastDone sql.NullTime
+	var oneOff bool
 	err = s.db.QueryRow(
-		"SELECT title, interval_days, points, assignee_id, next_due_at FROM chores WHERE id = ?", id,
-	).Scan(&title, &intervalDays, &reward, &assignee, &due)
+		`SELECT title, interval_days, points, assignee_id, next_due_at, last_done_at, one_off
+		 FROM chores WHERE id = ?`, id,
+	).Scan(&title, &intervalDays, &reward, &assignee, &due, &lastDone, &oneOff)
 	if err != nil {
 		auth.HTTPError(w, http.StatusNotFound, "Aufgabe nicht gefunden")
 		return
 	}
 
 	now := time.Now()
+
+	// Eine einmalige Aufgabe lässt sich genau einmal abhaken. Ohne diese
+	// Prüfung wäre sie danach stichtagslos — und stichtagslos heisst sonst
+	// „noch nie erledigt", also beliebig oft Punkte für dieselbe Sache.
+	if oneOff && lastDone.Valid {
+		auth.HTTPError(w, http.StatusConflict,
+			"\u201e"+title+"\u201c ist bereits erledigt.")
+		return
+	}
 
 	// Ohne diese Prüfung konnte eine bereits erledigte Aufgabe von jedem
 	// weiteren Familienmitglied noch einmal abgehakt werden — jedes Mal mit
@@ -464,7 +523,11 @@ func (s *Service) Complete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Anyone may help out, but the points go to whoever actually did it.
-	nextDue := dueDate(now, intervalDays)
+	// Eine einmalige Aufgabe bekommt keinen neuen Stichtag — sie ist fertig.
+	var nextDue any
+	if !oneOff {
+		nextDue = dueDate(now, intervalDays)
+	}
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -549,7 +612,7 @@ func scanChore(row scanner, now time.Time) (Chore, error) {
 
 	if err := row.Scan(&c.ID, &c.Title, &c.Description, &c.IntervalDays, &c.Points, &c.Rotate,
 		&c.Assignment, &assignee, &lastDone, &nextDue, &c.CreatedAt, &c.UpdatedAt,
-		&name, &color, &emoji, &doneBy); err != nil {
+		&c.OneOff, &name, &color, &emoji, &doneBy); err != nil {
 		return Chore{}, err
 	}
 
@@ -569,6 +632,14 @@ func scanChore(row scanner, now time.Time) (Chore, error) {
 		c.IsDue = c.DaysUntilDue <= 0
 	} else {
 		c.IsDue = true
+	}
+	// Eine einmalige Aufgabe ist nach dem Abhaken fertig — für immer. Ohne
+	// Stichtag stünde sie sonst wieder als offen da, weil „kein Stichtag"
+	// sonst „noch nie erledigt" heisst.
+	if c.OneOff && lastDone.Valid {
+		c.Erledigt = true
+		c.IsDue = false
+		c.IsOverdue = false
 	}
 	c.LastDoneBy = doneBy.String
 	c.AssigneeName = name.String

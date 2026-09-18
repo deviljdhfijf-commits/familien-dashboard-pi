@@ -9,7 +9,8 @@
   import { de } from 'date-fns/locale';
   import { ApiError, weatherApi } from '$lib/api';
   import { session } from '$lib/stores';
-  import type { WeatherData, WeatherLocation } from '$lib/types';
+  import type { WeatherData, WeatherLocation, WeatherWindow } from '$lib/types';
+  import { alleFenster, dauer, fensterBeschreibung, uhr } from '$lib/utils/trockenfenster';
 
   let weather = $state<WeatherData | null>(null);
   let loading = $state(true);
@@ -39,6 +40,23 @@
       return '—';
     }
   };
+
+  /**
+   * Die Trockenfenster der ganzen Vorhersage, aber nicht alle auf einmal:
+   * Wer bis Freitag plant, plant nicht nach dieser Seite. Sechs sind genug,
+   * um heute und morgen vollständig zu sehen.
+   */
+  const fenster = $derived(alleFenster(weather).slice(0, 6));
+
+  /** Die Stunden, ab jetzt. Die Liste kommt schon ab der aktuellen Stunde. */
+  const stunden = $derived(weather?.hourly ?? []);
+
+  /** Wie stark eine Stunde hinterlegt wird — je nasser, desto deutlicher. */
+  function nassStufe(prob: number): string {
+    if (prob >= 80) return 'bg-sky-500/25';
+    if (prob >= 55) return 'bg-sky-500/15';
+    return 'bg-sky-500/[0.07]';
+  }
 
   function locationLabel(loc: WeatherLocation | undefined): string {
     if (!loc) return '';
@@ -257,6 +275,95 @@
       {/if}
     </section>
 
+    <!--
+      Die Frage, mit der diese Seite aufgerufen wird, lautet nicht „wie warm
+      wird es" — sie lautet „wann können wir raus". Also steht die Antwort
+      darauf oben, noch vor der Tagesliste.
+    -->
+    <section class="card mb-4">
+      <div class="p-4 pb-3">
+        <h2 class="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+          Trockenfenster
+        </h2>
+        <p class="mt-1 text-xs text-muted-foreground">
+          Zeiträume ohne Regen, zwischen Sonnenaufgang und Sonnenuntergang.
+        </p>
+      </div>
+
+      {#if fenster.length === 0}
+        <p class="border-t border-border p-4 text-sm text-muted-foreground">
+          In der Vorhersage ist kein trockener Zeitraum von mindestens anderthalb Stunden dabei.
+        </p>
+      {:else}
+        <ul class="divide-y divide-border border-t border-border">
+          {#each fenster as f (f.tag.date + f.fenster.from)}
+            {@const FensterIcon = f.fenster.sunny ? Sun : Cloud}
+            <li class="flex items-center gap-3 p-4">
+              <FensterIcon
+                class="h-6 w-6 shrink-0 {f.fenster.sunny
+                  ? 'text-amber-500'
+                  : 'text-muted-foreground'}"
+              />
+              <div class="min-w-0 flex-1">
+                <p class="flex flex-wrap items-center gap-x-2 text-sm font-medium">
+                  <span class="capitalize">{dayLabel(f.tag.date, f.tagIndex)}</span>
+                  <span class="tabular-nums">{uhr(f.fenster.from)}–{uhr(f.fenster.to)} Uhr</span>
+                  {#if f.fenster.now}
+                    <span
+                      class="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary"
+                    >
+                      läuft
+                    </span>
+                  {/if}
+                </p>
+                <p class="mt-0.5 text-[11px] text-muted-foreground">
+                  {fensterBeschreibung(f.fenster)}
+                </p>
+              </div>
+              <span class="shrink-0 text-sm font-semibold tabular-nums">
+                {dauer(f.fenster.hours)}
+              </span>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
+
+    {#if stunden.length > 0}
+      <!--
+        Stunde für Stunde, damit man das Fenster oben nachvollziehen kann.
+        Die nassen Stunden sind hinterlegt — je kräftiger, desto sicherer der
+        Regen. Die hellen Lücken dazwischen sind die Fenster.
+      -->
+      <section class="card mb-4">
+        <h2 class="p-4 pb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+          Stunde für Stunde
+        </h2>
+        <div class="scrollbar-thin flex gap-1 overflow-x-auto px-4 pb-4">
+          {#each stunden as h (h.time)}
+            {@const StundenIcon = iconFor(h.icon)}
+            <div
+              class="flex w-14 shrink-0 flex-col items-center gap-1 rounded-lg py-2 {h.wet
+                ? nassStufe(h.precip_probability)
+                : ''}"
+            >
+              <span class="text-[11px] tabular-nums text-muted-foreground">
+                {format(parseISO(h.time), 'HH')}
+              </span>
+              <StundenIcon class="h-4 w-4 {h.wet ? 'text-sky-500' : 'text-primary'}" />
+              <span class="text-sm font-medium tabular-nums">{Math.round(h.temperature)}°</span>
+              <span class="h-3.5 text-[10px] tabular-nums text-sky-600 dark:text-sky-400">
+                {#if h.precip_probability >= 10}{h.precip_probability}%{/if}
+              </span>
+            </div>
+          {/each}
+        </div>
+        <p class="px-4 pb-4 text-[11px] text-muted-foreground">
+          Hinterlegt: Stunden, in denen Regen zu erwarten ist.
+        </p>
+      </section>
+    {/if}
+
     <section class="card divide-y divide-border">
       <h2 class="p-4 pb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
         Die nächsten Tage
@@ -269,6 +376,13 @@
 
           <div class="min-w-0 flex-1">
             <p class="truncate text-sm">{day.description}</p>
+            {#if (day.windows ?? []).length > 0}
+              <p class="truncate text-[11px] text-primary">
+                Trocken {(day.windows ?? [])
+                  .map((w: WeatherWindow) => `${uhr(w.from)}–${uhr(w.to)}`)
+                  .join(' · ')}
+              </p>
+            {/if}
             <p class="flex flex-wrap items-center gap-x-3 text-[11px] text-muted-foreground">
               {#if day.precip_probability > 0}
                 <span class="text-sky-600 dark:text-sky-400">💧 {day.precip_probability}%</span>

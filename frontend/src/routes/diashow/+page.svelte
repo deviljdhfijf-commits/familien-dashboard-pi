@@ -3,9 +3,13 @@
   import { goto } from '$app/navigation';
   import { format, parseISO } from 'date-fns';
   import { de } from 'date-fns/locale';
-  import { ChevronLeft, ChevronRight, Images, Pause, Play, X } from 'lucide-svelte';
+  import {
+    ChevronLeft, ChevronRight, Images, Maximize, Minimize, Pause, Play, X,
+  } from 'lucide-svelte';
   import { calendarApi, choresApi, photosApi, shoppingApi, weatherApi } from '$lib/api';
   import { diashow } from '$lib/stores/diashow.svelte';
+  import { vollbild } from '$lib/vollbild.svelte';
+  import { fensterSatz, naechstesFenster, zeitpunkt } from '$lib/utils/trockenfenster';
   import type { CalendarEvent, Chore, Photo, WeatherData } from '$lib/types';
 
   /** Wie lange ein Bild stehen bleibt. Kurz genug, dass es lebendig wirkt. */
@@ -28,6 +32,14 @@
   let uhrTimer: ReturnType<typeof setInterval> | null = null;
   let datenTimer: ReturnType<typeof setInterval> | null = null;
   let bedienTimer: ReturnType<typeof setTimeout> | null = null;
+  let hinweisTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Der Hinweis „Antippen für Vollbild" gilt der Diashow, die das Wandgerät
+   * von selbst öffnet — dort fehlt die Geste, die der Browser für Vollbild
+   * verlangt. Er geht weg, sobald jemand den Bildschirm anfasst.
+   */
+  let vollbildHinweis = $state(false);
 
   const aktuell = $derived(photos.length > 0 ? photos[index % photos.length] : null);
   const offeneAufgaben = $derived(chores.filter((c) => c.is_due).length);
@@ -38,11 +50,17 @@
       .slice(0, 2),
   );
 
+  /**
+   * Im Flur zählt dieselbe Frage wie überall: wann können wir raus. Das
+   * Trockenfenster beantwortet sie, der Regen sagt nur, warum gerade nicht.
+   */
+  const fenster = $derived(naechstesFenster(weather));
+  const trockenSatz = $derived(fenster ? fensterSatz(fenster) : null);
+
   const regenSatz = $derived.by(() => {
     const r = weather?.rain;
-    if (!r) return null;
-    if (r.now) return r.ends_at ? `Regen bis ${uhr(r.ends_at)}` : 'Es regnet';
-    if (r.starts_at) return `Regen ab ${uhr(r.starts_at)}`;
+    if (r?.now) return r.ends_at ? `Regen bis ${zeitpunkt(r.ends_at)}` : 'Es regnet';
+    if (r?.starts_at) return `Regen ab ${zeitpunkt(r.starts_at)}`;
     return null;
   });
 
@@ -88,8 +106,56 @@
     }, 4000);
   }
 
+  /**
+   * Die erste Berührung auf dem Bildschirm ist eine Geste — genau das, was
+   * der Browser für Vollbild verlangt. Einmal antippen genügt, dann zieht er
+   * seine Adressleiste zurück, auch ohne installierte App.
+   */
+  async function ersteBeruehrung() {
+    if (vollbild.verfuegbar && !vollbild.aktiv) await vollbild.ein();
+    vollbildHinweis = false;
+    void holeWachschutz();
+  }
+
   function beenden() {
+    // Das Vollbild gehört zur Diashow und hört mit ihr auf — sonst stünde
+    // das Dashboard danach ohne Leisten da, mit denen man weiterkommt.
+    void vollbild.aus();
     goto('/');
+  }
+
+  // ---------------------------------------------------------- Wachschutz
+  // Ein Wandtablet, das mitten in der Diashow den Bildschirm abschaltet, ist
+  // kein Bilderrahmen. Der Wake Lock hält das Display wach, solange die Show
+  // läuft — und gibt es wieder frei, sobald die Seite verlassen wird.
+
+  interface Wachschutz {
+    release: () => Promise<void>;
+    addEventListener: (typ: 'release', rueckruf: () => void) => void;
+  }
+
+  let wachschutz: Wachschutz | null = null;
+
+  async function holeWachschutz() {
+    if (!('wakeLock' in navigator) || wachschutz) return;
+    try {
+      // Der Typ steckt hinter einer Fähigkeitsprüfung; je nach lib-Version
+      // kennt TypeScript ihn noch nicht.
+      wachschutz = await (
+        navigator as Navigator & {
+          wakeLock: { request: (typ: 'screen') => Promise<Wachschutz> };
+        }
+      ).wakeLock.request('screen');
+      wachschutz.addEventListener('release', () => (wachschutz = null));
+    } catch {
+      // Nicht schlimm — dann geht der Bildschirm eben irgendwann aus.
+    }
+  }
+
+  function beiSichtbarkeit() {
+    // Nach einem Blick aufs Handy oder in eine andere App gibt der Browser
+    // den Lock frei. Beim Zurückkommen neu anfordern.
+    if (document.visibilityState === 'visible') void holeWachschutz();
   }
 
   onMount(async () => {
@@ -102,6 +168,15 @@
     starteBildwechsel();
     uhrTimer = setInterval(() => (jetzt = new Date()), 10_000);
     datenTimer = setInterval(ladeDaten, DATEN_MS);
+    void holeWachschutz();
+    document.addEventListener('visibilitychange', beiSichtbarkeit);
+
+    // Läuft das Vollbild schon (Start über den Diashow-Knopf), braucht es
+    // keinen Hinweis. Sonst leise zeigen, wo die Geste hin soll.
+    if (vollbild.verfuegbar && !vollbild.aktiv) {
+      vollbildHinweis = true;
+      hinweisTimer = setTimeout(() => (vollbildHinweis = false), 8000);
+    }
   });
 
   onDestroy(() => {
@@ -109,6 +184,9 @@
     if (uhrTimer) clearInterval(uhrTimer);
     if (datenTimer) clearInterval(datenTimer);
     if (bedienTimer) clearTimeout(bedienTimer);
+    if (hinweisTimer) clearTimeout(hinweisTimer);
+    document.removeEventListener('visibilitychange', beiSichtbarkeit);
+    void wachschutz?.release();
   });
 
   $effect(() => {
@@ -137,7 +215,10 @@
 <div
   class="fixed inset-0 z-[80] overflow-hidden bg-black text-white"
   onpointermove={zeigeBedienung}
-  onpointerdown={zeigeBedienung}
+  onpointerdown={() => {
+    zeigeBedienung();
+    void ersteBeruehrung();
+  }}
   role="presentation"
 >
   {#if aktuell}
@@ -191,9 +272,12 @@
       <div class="font-display text-4xl font-light leading-none sm:text-5xl">
         {Math.round(weather.current.temperature)}°
       </div>
+      {#if trockenSatz}
+        <div class="mt-1.5 text-sm font-light text-emerald-200">{trockenSatz}</div>
+      {/if}
       {#if regenSatz}
-        <div class="mt-1.5 text-sm font-light text-sky-200">{regenSatz}</div>
-      {:else}
+        <div class="mt-0.5 text-sm font-light text-sky-200">{regenSatz}</div>
+      {:else if !trockenSatz}
         <div class="mt-1.5 text-sm font-light text-white/65">{weather.current.description}</div>
       {/if}
     </div>
@@ -257,6 +341,16 @@
         >
           <ChevronRight class="h-5 w-5" />
         </button>
+        {#if vollbild.verfuegbar}
+          <button
+            class="flex h-12 w-12 items-center justify-center rounded-full border border-white/20 bg-white/15 backdrop-blur transition-colors hover:bg-white/25"
+            onclick={() => vollbild.umschalten()}
+            aria-label={vollbild.aktiv ? 'Vollbild verlassen' : 'Vollbild starten'}
+            title={vollbild.aktiv ? 'Vollbild verlassen' : 'Vollbild starten'}
+          >
+            {#if vollbild.aktiv}<Minimize class="h-5 w-5" />{:else}<Maximize class="h-5 w-5" />{/if}
+          </button>
+        {/if}
         <button
           class="ml-3 flex h-12 w-12 items-center justify-center rounded-full border border-white/20 bg-white/15 backdrop-blur transition-colors hover:bg-white/25"
           onclick={beenden}
@@ -267,6 +361,31 @@
       </div>
     </div>
   </div>
+
+  <!--
+    Hinweis für die Diashow, die das Wandgerät selbst öffnet: Vollbild
+    braucht eine Berührung, und dieser Zeiger sagt leise, wo sie hin soll.
+  -->
+  {#if vollbildHinweis}
+    <div class="pointer-events-none absolute inset-x-0 bottom-24 flex justify-center">
+      <p class="rounded-full bg-black/50 px-4 py-1.5 text-xs text-white/70 backdrop-blur">
+        Antippen für Vollbild
+      </p>
+    </div>
+  {/if}
+
+  <!--
+    Geräte ohne Vollbild-API (iPhone Safari) bekommen keinen toten Knopf,
+    sondern den Weg, der dort funktioniert: als App auf dem Home-Bildschirm
+    läuft die Seite ohne Adressleiste.
+  -->
+  {#if !vollbild.verfuegbar && bedienung}
+    <div class="pointer-events-none absolute inset-x-0 bottom-24 flex justify-center">
+      <p class="rounded-full bg-black/50 px-4 py-1.5 text-xs text-white/70 backdrop-blur">
+        Ohne Adressleiste: „Zum Home-Bildschirm“ hinzufügen
+      </p>
+    </div>
+  {/if}
 
   {#if photos.length > 1}
     <div class="absolute inset-x-0 bottom-0 h-0.5 bg-white/15">

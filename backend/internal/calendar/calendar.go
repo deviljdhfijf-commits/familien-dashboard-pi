@@ -40,6 +40,14 @@ type Event struct {
 	Editable bool   `json:"editable"`
 	EventID  int    `json:"event_id,omitempty"`
 	Repeat   string `json:"repeat,omitempty"`
+
+	// Wem der Termin gehört. Leer heisst: der ganzen Familie. Name, Farbe
+	// und Emoji reisen mit, damit die Oberfläche für „Mama: Zahnarzt" nicht
+	// erst die Benutzerliste nachladen muss.
+	UserID    int    `json:"user_id,omitempty"`
+	UserName  string `json:"user_name,omitempty"`
+	UserColor string `json:"user_color,omitempty"`
+	UserEmoji string `json:"user_emoji,omitempty"`
 }
 
 type Service struct {

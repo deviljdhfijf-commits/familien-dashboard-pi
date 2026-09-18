@@ -12,6 +12,88 @@ Deshalb gibt es hier **keine 1.4.5**. Sie stand eine Weile in dieser Datei,
 wurde aber nie veröffentlicht: Auf GitHub steht v1.4.4, und der Pi läuft
 darauf. Was unter 1.4.5 gesammelt war, ist in 1.5.0 aufgegangen.
 
+## [1.7.0] — 2026-09-14
+
+### Hinzugefügt
+
+- **Trockenfenster.** Die Wetterfrage in dieser Familie lautet nicht „wie
+  warm wird es", sondern *wann können wir raus*. Darauf antwortet keine
+  Prozentzahl, sondern ein Zeitraum.
+
+  Das Dashboard nennt jetzt das nächste Fenster im Klartext — *„Trocken
+  morgen 06:50 bis 19:33 · 12,5 Std."* — und die Wetterseite listet die
+  Fenster der ganzen Vorhersage mit Länge, Bewölkung und gefühlter
+  Temperatur. Darunter steht der Verlauf Stunde für Stunde; die nassen
+  Stunden sind hinterlegt, die hellen Lücken dazwischen sind die Fenster.
+
+  Gerechnet wird nur zwischen Sonnenauf- und Sonnenuntergang: Ein trockenes
+  Fenster um drei Uhr nachts ist statistisch richtig und praktisch wertlos.
+  Als nass gilt eine Stunde ab 0,1 mm **oder** ab 55 % Wahrscheinlichkeit —
+  beide Wege zählen, sonst meldete das Dashboard bei „60 %, 0,05 mm"
+  trockenes Wetter. Unter anderthalb Stunden ist kein Fenster, sondern eine
+  Lücke zwischen zwei Schauern.
+
+  Dadurch steht an einem Tag mit 83 % Regenwahrscheinlichkeit jetzt
+  gegebenenfalls *„Trocken 07:00–19:30"*, wenn der Regen in die Nacht fällt.
+  Genau dafür ist die Rechnung da.
+
+- **Einmalige Aufgaben.** Eine Aufgabe konnte bisher nur wiederkehren. Für
+  „Keller aufräumen" oder „Zahnarzttermin ausmachen" war das eine Erfindung:
+  Sie kommt nicht in sieben Tagen wieder, sie ist dann fertig.
+
+  Beim Anlegen gibt es jetzt *Nur einmal*. Eine solche Aufgabe steht ab
+  sofort an, lässt sich genau einmal abhaken und bleibt danach
+  durchgestrichen in der Liste stehen — am Monatsende will man sehen, was
+  tatsächlich geschafft wurde. Ein Knopf räumt alle erledigten auf einmal
+  weg.
+
+- **Monatswertung, die stehen bleibt.** Die Gesamtwertung wächst immer
+  weiter; wer im März angefangen hat, holt den Vorsprung nie mehr auf. Ein
+  Monat dagegen fängt für alle bei null an.
+
+  Auf der Ranglisten-Seite steht jetzt der laufende Monat als Zwischenstand
+  und darunter jeder abgeschlossene mit seinem Endergebnis und den Plätzen.
+  Abgeschlossene Monate werden einmal festgeschrieben und danach nicht mehr
+  angefasst — auch dann nicht, wenn die einmaligen Aufgaben von damals
+  längst gelöscht sind. Gleichstand teilt sich einen Platz, und beide Namen
+  stehen da.
+
+- **Termine für einzelne Personen.** Ein Termin gehörte bisher immer der
+  ganzen Familie; ein Feld für eine Person gab es gar nicht. Gemeldet war
+  das als Rechteproblem — es war keins: Beide Administratorinnen konnten
+  schon vorher dasselbe, nämlich beide nicht. Jetzt lässt sich zu jedem
+  Termin eine Person wählen, ihr Gesicht steht in der Kachel daneben. Aus
+  `.ics`-Dateien gelesene Termine haben keine Person; dort bleibt das Feld
+  leer, statt eine zu erfinden.
+
+- **Wöchentliche Termine mit festem Wochentag.** *„Immer donnerstags"* ist
+  das, was man sagen will — nicht „ab dem 18., und der ist zufällig ein
+  Donnerstag". Die Auswahl schiebt das Datum sichtbar auf den nächsten
+  passenden Tag vor.
+
+- **Wiederholung „Jeden Tag".** Für die Tablette am Morgen und den Hund am
+  Abend.
+
+- **Vollbild und Wachschutz für die Diashow.** Ein Wandtablet, das mitten in
+  der Diashow den Bildschirm abschaltet, ist kein Bilderrahmen. Solange die
+  Show läuft, bleibt das Display an. Und eine Berührung genügt, um die
+  Adressleiste loszuwerden — ohne die App installieren zu müssen. Geräte
+  ohne Vollbild-Funktion (iPhone Safari) bekommen statt eines toten Knopfs
+  den Weg, der dort funktioniert.
+
+### Behoben
+
+- **Tägliche und wöchentliche Termine aus der Vergangenheit verschwanden.**
+  Die Wiederholungen wurden vom Starttag an einzeln abgezählt, bis zur
+  Obergrenze von 500. Ein täglicher Termin, der vor zwei Jahren angelegt
+  wurde, war damit am Ende, bevor er das heutige Datum erreichte — und
+  stand gar nicht mehr im Kalender. Jetzt wird der vergangene Teil
+  übersprungen statt durchgezählt.
+
+- **„Regen ab 20:30" konnte den falschen Tag meinen.** Die Uhrzeit stand
+  ohne Tag da und las sich wie heute Abend, auch wenn sie morgen Abend
+  meinte. Jetzt steht der Tag dabei, sobald es nicht heute ist.
+
 ## [1.6.1] — 2026-09-10
 
 ### Behoben

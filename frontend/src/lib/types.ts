@@ -34,6 +34,27 @@ export interface WeatherDay {
   sunset: string;
   icon: string;
   description: string;
+  /** Die Trockenfenster dieses Tages. Leer heisst: an dem Tag ist keins dabei. */
+  windows?: WeatherWindow[];
+}
+
+/**
+ * Ein Zeitraum zwischen Sonnenauf- und -untergang, in dem kein Regen zu
+ * erwarten ist — die Zahl, nach der die Freizeit geplant wird. „82 %
+ * Regenwahrscheinlichkeit" beantwortet nicht, ob der Spaziergang um drei geht.
+ */
+export interface WeatherWindow {
+  from: string;
+  to: string;
+  /** Länge in Stunden, auf eine halbe gerundet. */
+  hours: number;
+  cloud_cover: number;
+  feels_like_min: number;
+  feels_like_max: number;
+  /** Beschreibt das Fenster, entscheidet nicht darüber. */
+  sunny: boolean;
+  /** true, wenn dieses Fenster gerade läuft. */
+  now: boolean;
 }
 
 export interface WeatherLocation {
@@ -48,10 +69,15 @@ export interface WeatherLocation {
 export interface WeatherHour {
   time: string;
   temperature: number;
+  feels_like: number;
   precip_probability: number;
   precipitation: number;
   weather_code: number;
+  cloud_cover: number;
+  wind_speed: number;
   icon: string;
+  /** Dieselbe Schwelle, die auch die Fenster bestimmt — nicht neu erfunden. */
+  wet: boolean;
 }
 
 /** Wann fängt es an, wann hört es auf — die Frage vor jeder Radtour. */
@@ -75,7 +101,7 @@ export interface WeatherData {
   stale: boolean;
 }
 
-export type EventRepeat = 'none' | 'weekly' | 'monthly' | 'yearly';
+export type EventRepeat = 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly';
 
 export interface CalendarEvent {
   id: string;
@@ -93,6 +119,11 @@ export interface CalendarEvent {
   /** database id of the underlying appointment, for edit and delete. */
   event_id?: number;
   repeat?: EventRepeat;
+  /** Für wen der Termin gilt. Fehlt er, gilt er für die ganze Familie. */
+  user_id?: number;
+  user_name?: string;
+  user_color?: string;
+  user_emoji?: string;
 }
 
 export interface EventDraft {
@@ -105,6 +136,10 @@ export interface EventDraft {
   all_day: boolean;
   repeat: EventRepeat;
   color: string;
+  /** 0 = für alle. */
+  user_id: number;
+  /** Fester Wochentag wöchentlicher Termine, 0 = Montag. -1 = aus dem Datum. */
+  weekday: number;
 }
 
 export interface ShoppingItem {
@@ -154,6 +189,33 @@ export interface Chore {
   is_due: boolean;
   /** Wer zuletzt abgehakt hat — leer, solange es niemand getan hat. */
   last_done_by?: string;
+  /** Eine Aufgabe, die genau einmal ansteht und danach nicht wiederkommt. */
+  one_off: boolean;
+  /** Nur bei einmaligen Aufgaben: abgehakt und damit endgültig fertig. */
+  done: boolean;
+}
+
+/** Eine Zeile einer Monatsrangliste. */
+export interface MonthRank {
+  user_id: number;
+  name: string;
+  color: string;
+  avatar_emoji: string;
+  points: number;
+  activities: number;
+  rank: number;
+}
+
+/**
+ * Die Rangliste eines Monats. Abgeschlossene Monate bleiben stehen, auch
+ * wenn die einmaligen Aufgaben von damals gelöscht wurden.
+ */
+export interface MonthBoard {
+  month: string;
+  label: string;
+  ranks: MonthRank[];
+  /** true für den Monat, der gerade läuft — ein Zwischenstand. */
+  running: boolean;
 }
 
 export interface Badge {
